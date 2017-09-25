@@ -1,0 +1,191 @@
+---
+title: "Project Report - Practical Machine Learning - Prediction in Qualitative Activity Recognition of Weight Lifting Exercises"
+output:
+  html_document:
+    keep_md: yes
+  pdf_document: default
+---
+
+### Executive Summary
+
+One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify <i>how well they do it</i>. In this project, the goal is to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways.  
+The objective of this project is to predict the manner in which they did the exercise. This is the "classe" variable in the training set.  
+To do so, we used the data available to build a training and a testing data set in order to compute a prediction model and to validate it. Those data contain a lot of variables, more or less correlated to each other, so we needed first to proceed with cleaning actions to keep only the relevant informations.  
+Our analysis led to say that the random forest predictor is much more accurate than the CART model. And random forest predictor is good enough to be used as a predictor for any input variables since the uncertainty rate is very low (99.8% of accuracy based on the testing data set).  
+
+NB: For more details regarding the data set, please refer to appendix 1.  
+
+```{r load_libraries, echo = FALSE, results = 'hide', message = FALSE, warning = FALSE}
+library(ggplot2)
+library(caret)
+library(plyr)
+library(randomForest)
+library(rpart)
+library(rattle)
+```
+
+After loading the data set from the files 'pml-training.csv' and 'pml-testing.csv' available on the Website 'cloudfront.net', some quick exploratory actions have been performed and moved to appendix 2.  
+
+```{r load_data, echo = TRUE, cache = TRUE, message = FALSE, warning = FALSE}
+training_url <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+testing_url <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+# Load the data sets from given URL and consider NA every empty values or values equal to '#DIV/0!'
+training <- read.csv(url(training_url), na.strings = c("NA","#DIV/0!",""))
+testing <- read.csv(url(testing_url), na.strings = c("NA","#DIV/0!",""))
+```
+
+***
+### Data transformation
+
+We will first split the csv file 'training' and build our 'training' and 'testing' data sets for our analysis. Then, we will reduce the number of variables from 160 to 58 (including our outcome 'classe') by removing those which are computations of others (and consequently very corrolated to others).  
+
+```{r data_transformation, echo = TRUE, cache = TRUE, message = FALSE, warning = FALSE}
+set.seed(12345)
+# Partitioning the training data in 2: training with 70% of the original dataset
+# and testing with the remaining 30%
+inTrain <- createDataPartition(y = training$classe, p = 0.7, list = FALSE)
+train_data <- training[inTrain, ]
+test_data <- training[-inTrain, ]
+
+# Data transformation for further purpose
+# Factorize the outcome 'classe' and variable 'user_name' which is a character string
+# (this might be a problem with randomforest if not factorized)
+train_data$classe <- as.factor(train_data$classe)
+train_data$user_name <- as.factor(train_data$user_name)
+
+test_data$classe <- as.factor(test_data$classe)
+test_data$user_name <- as.factor(test_data$user_name)
+
+# The testing data set does not contain the outcome 'classe'
+testing$user_name <- as.factor(testing$user_name)
+
+# Remove useless variables
+# Dimensions of our data sets before cleaning
+dim(train_data)
+dim(test_data)
+dim(testing)
+
+# We keep only variables related to measurements and we get rid of all the columns which
+# are the results of computation of the others, and so, are very correlated to some others
+pattern <- "^(X|new_|kurtosis_|skewness_|max_|min_|amplitude_|avg_|stddev_|var_|skewness_$)"
+columns_to_drop <- grep(pattern = pattern, names(train_data), value = TRUE)
+# Number of columns to drop
+print(length(columns_to_drop))
+columns_to_keep <- names(train_data)[!(names(train_data) %in% columns_to_drop)]
+train_data <- train_data[, columns_to_keep]
+test_data <- test_data[, columns_to_keep]
+# The testing data set does not contain the outcome 'classe'
+columns_to_keep <- columns_to_keep[-58]
+testing <- testing[, columns_to_keep]
+
+# Dimensions of our data sets after cleaning
+dim(train_data)
+dim(test_data)
+dim(testing)
+```
+
+***
+### Analysis
+
+Now that the data sets are ready, we can proceed with our analysis.  
+First we will fit a CART model with the rpart method using all predictor variables we kept and method 'class'. And we use our testing data set 'test_data' to check the accuracy of our model.  
+
+```{r model_selection_rpart, echo = TRUE, cache = TRUE}
+# CART model using rpart method
+modCART <- rpart(classe ~ ., data = train_data, method = "class")
+# We can plot the resulting tree using the function 'fancyRpartPlot'
+fancyRpartPlot(modCART)
+predictCART <- predict(modCART, test_data, type = "class")
+table(test_data$classe)
+table(predictCART)
+confusionMatrix(predictCART, test_data$classe)$overall
+```
+
+Then, we fit a random forest predictor relating the factor variable 'classe' to the remaining variables. And again, we use our testing data set 'test_data' to check the accuracy of our new model.  
+
+```{r model_selection_rf, echo = TRUE, cache = TRUE}
+# Random forest predictor
+modRF <- randomForest(classe ~ ., data = train_data)
+predictRF <- predict(modRF, test_data, type = "class")
+table(test_data$classe)
+table(predictRF)
+confusionMatrix(predictRF, test_data$classe)$overall
+```
+
+From here, we can see that the <span style="color:red;background-color:#eeeeee;padding:3px;border-radius:3px 3px 3px;border:.5px solid lightgrey">random forest predictor has a far better accuracy of ```r round((confusionMatrix(predictRF, test_data$classe)$overall[1]) * 100, 2)``` %</span> when the <span style="color:red;background-color:#eeeeee;padding:3px;border-radius:3px 3px 3px;border:.5px solid lightgrey">CART model meets only ```r round((confusionMatrix(predictCART, test_data$classe)$overall[1]) * 100, 2)``` % of the expected outcomes</span>. We will preferably use the random forest for any prediction rather than the CART model.  
+<span style="color:red;background-color:#eeeeee;padding:3px;border-radius:3px 3px 3px;border:.5px solid lightgrey">The uncertainty is very low and expercted errors from outcome can be considered as null when using random forest in our case.</span>  
+
+***
+### Prediction on data set Testing
+
+Finally, we use our random forest model to predict the outcome of our 'testing' data set with 20 different test cases.  
+
+```{r predict_testing_rf, echo = TRUE}
+# The random forest predictor is very tricky with the class types of the variables.
+# So we need to be sure that variables of our 'testing' data set are with the exact
+# same class types of the data set 'train_data' that was used to build the
+# random forest predictor.
+# Below is a quick way to coerce the variables of 'testing' to class types from 'train_data':
+class_testing <- test_data[1,-58]
+testing <- rbind(class_testing, testing[1:20,])
+testing <- testing[2:21,]
+rownames(testing) <- 1:nrow(testing)
+
+# Prediction of 'testing' outcome using random forest model
+resultRF <- predict(modRF, testing, type = "class")
+resultRF
+```
+
+For comparison, below is the prediction using the CART model.  
+
+```{r predict_testing_rpart, echo = TRUE}
+# Prediction of 'testing' outcome using rpart model
+resultCART <-  predict(modCART, testing, type = "class")
+resultCART
+```
+
+***
+### Appendix
+
+1. A few details regarding our data set  
+
+The outcome **classe**: different fashions that can take the set of 10 repetitions of the Unilateral Dumbbell Biceps Curl:  
+    . A: exactly according to the specification  
+    . B: throwing the elbows to the front  
+    . C: lifting the dumbbell only halfway  
+    . D: lowering the dumbbell only halfway  
+    . E: throwing the hips to the front  
+
+<div class = "row">
+<div class = "col-sm-4">
+
+![](./pictures/on-body-sensing-schema.png){width=260px}
+
+</div>
+<div class = "col-md-8">
+
+This human activity recognition research has traditionally focused on discriminating between different activities, i.e. to predict "which" activity was performed at a specific point in time (like with the Daily Living Activities dataset above). The approach we propose for the Weight Lifting Exercises dataset is to investigate "how (well)" an activity was performed by the wearer. The "how (well)" investigation has only received little attention so far, even though it potentially provides useful information for a large variety of applications,such as sports training.  
+
+In this work (see the paper) we first define quality of execution and investigate three aspects that pertain to qualitative activity recognition: the problem of specifying correct execution, the automatic and robust detection of execution mistakes, and how to provide feedback on the quality of execution to the user. We tried out an on-body sensing approach (dataset here), but also an "ambient sensing approach" (by using Microsoft Kinect - dataset still unavailable)  
+
+Six young health participants were asked to perform one set of 10 repetitions of the Unilateral Dumbbell Biceps Curl in five different fashions: exactly according to the specification (Class A), throwing the elbows to the front (Class B), lifting the dumbbell only halfway (Class C), lowering the dumbbell only halfway (Class D) and throwing the hips to the front (Class E).  
+
+Class A corresponds to the specified execution of the exercise, while the other 4 classes correspond to common mistakes. Participants were supervised by an experienced weight lifter to make sure the execution complied to the manner they were supposed to simulate. The exercises were performed by six male participants aged between 20-28 years, with little weight lifting experience. We made sure that all participants could easily simulate the mistakes in a safe and controlled manner by using a relatively light dumbbell (1.25kg).  
+
+</div>
+</div>
+
+***
+### Credit
+Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H. Qualitative Activity Recognition of Weight Lifting Exercises. Proceedings of 4th International Conference in Cooperation with SIGCHI (Augmented Human '13) . Stuttgart, Germany: ACM SIGCHI, 2013.  
+
+Read more: http://groupware.les.inf.puc-rio.br/har#ixzz4tBCtG1oY  
+
+2. Exploratory data analysis  
+```{r exploratory_data_analysis, echo = TRUE, cache = TRUE}
+dim(train_data)
+names(train_data)
+summary(train_data)
+sum(is.na(train_data$classe))
+unique(train_data$classe)
+```
